@@ -1,0 +1,50 @@
+# =========================
+# Backend (Java / Maven)
+# =========================
+backend/target/
+backend/*.jar
+backend/.mvn/
+backend/mvnw
+backend/mvnw.cmd
+
+# =========================
+# Frontend (Node / Vite)
+# =========================
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# =========================
+# IDE
+# =========================
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.project
+.classpath
+.settings/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.local
+.env.*.local
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+
+# =========================
+# Gemini Agent
+# =========================
+.gemini/
