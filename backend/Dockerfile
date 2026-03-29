@@ -11,4 +11,4 @@ WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 VOLUME /tmp
 EXPOSE 8080
-ENTRYPOINT ["java","-Xmx512m","-Djava.security.egd=file:/dev/./urandom","-jar","app.jar"]
+ENTRYPOINT ["java","-Xmx384m","-XX:+UseContainerSupport","-Djava.security.egd=file:/dev/./urandom","-jar","app.jar"]
