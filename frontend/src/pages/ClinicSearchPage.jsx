@@ -14,7 +14,7 @@ export default function ClinicSearchPage() {
   const [clinics, setClinics] = useState(cache.query === q ? cache.results : []);
   const [loading, setLoading] = useState(cache.query === q ? false : true);
   const [error, setError] = useState('');
-  const [locationStatus, setLocationStatus] = useState(cache.query === q ? '' : 'Getting location...');
+  const [locationBlocked, setLocationBlocked] = useState(false);
   const searchRef = useRef(null);
 
   const fetchPlaces = useCallback(async (lat, lng) => {
@@ -24,6 +24,7 @@ export default function ClinicSearchPage() {
     }
     setError('');
     setLocationStatus('');
+    setLocationBlocked(false);
     try {
       const data = await getNearbyPlaces(lat, lng, q, 5000);
       setClinics(data || []);
@@ -41,12 +42,10 @@ export default function ClinicSearchPage() {
     if (searchRef.current === q) return;
     searchRef.current = q;
 
-    // Basic fallback location (Bangalore / Default)
-    const fallbackLat = 12.9716;
-    const fallbackLng = 77.5946;
-
     if (!navigator.geolocation) {
-      fetchPlaces(fallbackLat, fallbackLng);
+      setLocationStatus('');
+      setError('Geolocation is not supported by your browser.');
+      setLoading(false);
       return;
     }
 
@@ -55,10 +54,16 @@ export default function ClinicSearchPage() {
         fetchPlaces(position.coords.latitude, position.coords.longitude);
       },
       (geoError) => {
-        console.warn('Geolocation failed, using fallback.', geoError);
-        fetchPlaces(fallbackLat, fallbackLng);
+        console.warn('Geolocation failed:', geoError);
+        setLoading(false);
+        setLocationStatus('');
+        if (geoError.code === 1) { // Permission denied
+          setLocationBlocked(true);
+        } else {
+          setError('Could not determine your location. Please search by city manually.');
+        }
       },
-      { timeout: 5000 } // Don't hang forever
+      { timeout: 8000, enableHighAccuracy: false } // 8s timeout, high accuracy off for faster fix
     );
   }, [q, fetchPlaces]);
 
@@ -98,8 +103,14 @@ export default function ClinicSearchPage() {
             {error}
           </div>
         )}
-        {locationStatus && !error && (
-           <div className="text-primary-300 text-sm animate-pulse">{locationStatus}</div>
+        {locationBlocked && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-4 text-sm flex flex-col gap-2">
+            <p className="font-semibold">Location Access Denied</p>
+            <p>We couldn't detect your location. Please use the search bar above to find clinics by **City**, **PIN Code**, or **Clinic Name**.</p>
+          </div>
+        )}
+        {!loading && !error && !locationBlocked && clinics.length === 0 && (
+           <div className="text-slate-400 text-sm italic">Showing default search results for "{q}"</div>
         )}
 
         {/* Grid */}

@@ -158,9 +158,9 @@ export default function LabSearchPage() {
           fetchLabs(loc.lat, loc.lng);
         },
         () => {
-          fetchLabs(12.9716, 77.5946);
+          console.warn('Geolocation denied or failed for labs');
         },
-        { timeout: 5000 }
+        { timeout: 8000 }
       );
     }
   };

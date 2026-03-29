@@ -63,18 +63,18 @@ export default function HomePage() {
         .finally(() => setLoading(false));
     };
 
-    const fallbackLat = 12.9716;
-    const fallbackLng = 77.5946;
-
     if (!navigator.geolocation) {
-      fetchClinics(fallbackLat, fallbackLng);
+      setLoading(false);
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (pos) => fetchClinics(pos.coords.latitude, pos.coords.longitude),
-      () => fetchClinics(fallbackLat, fallbackLng),
-      { timeout: 5000 }
+      () => {
+        setLoading(false);
+        console.warn('Geolocation denied or failed on home page');
+      },
+      { timeout: 8000 }
     );
   }, []);
 
