@@ -2,9 +2,7 @@ package com.clinicai.backend.service;
 
 import com.clinicai.backend.dto.AppointmentDTO;
 import com.clinicai.backend.dto.AppointmentRequest;
-import com.clinicai.backend.event.AppointmentBookedEvent;
 import com.clinicai.backend.exception.ResourceNotFoundException;
-import com.clinicai.backend.kafka.NotificationProducer;
 import com.clinicai.backend.model.Appointment;
 import com.clinicai.backend.model.User;
 import com.clinicai.backend.repository.AppointmentRepository;
@@ -21,7 +19,6 @@ public class AppointmentService {
 
     private final AppointmentRepository appointmentRepository;
     private final UserRepository userRepository;
-    private final NotificationProducer notificationProducer;
 
     @Transactional
     public AppointmentDTO bookAppointment(AppointmentRequest request) {
@@ -41,17 +38,6 @@ public class AppointmentService {
                 .build();
 
         Appointment saved = appointmentRepository.save(appointment);
-
-        // Publish event to Kafka
-        AppointmentBookedEvent event = AppointmentBookedEvent.builder()
-                .appointmentId(saved.getId())
-                .patientId(user.getId())
-                .patientName(user.getName())
-                .clinicName(saved.getClinicName())
-                .doctorName(saved.getDoctorName() != null ? saved.getDoctorName() : "Any Available Doctor")
-                .appointmentTime(saved.getAppointmentTime())
-                .build();
-        notificationProducer.publishAppointmentBooked(event);
 
         return toDTO(saved);
     }

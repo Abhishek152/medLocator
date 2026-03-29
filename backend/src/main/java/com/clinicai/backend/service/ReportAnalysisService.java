@@ -2,7 +2,6 @@ package com.clinicai.backend.service;
 
 import com.clinicai.backend.dto.ReportDetailDTO;
 import com.clinicai.backend.dto.ReportUploadResponse;
-import com.clinicai.backend.kafka.NotificationProducer;
 import com.clinicai.backend.model.MedicalReport;
 import com.clinicai.backend.model.ReportInsight;
 import com.clinicai.backend.model.User;
@@ -27,7 +26,6 @@ public class ReportAnalysisService {
     private final MedicalReportRepository reportRepository;
     private final ReportInsightRepository insightRepository;
     private final EmailService emailService;
-    private final NotificationProducer notificationProducer;
     private final ObjectMapper objectMapper;
     private final String openRouterApiKey;
     private final String openRouterModel;
@@ -38,7 +36,6 @@ public class ReportAnalysisService {
             MedicalReportRepository reportRepository,
             ReportInsightRepository insightRepository,
             EmailService emailService,
-            NotificationProducer notificationProducer,
             @Value("${openrouter.api-key}") String openRouterApiKey,
             @Value("${openrouter.model}") String openRouterModel,
             ObjectMapper objectMapper) {
@@ -46,7 +43,6 @@ public class ReportAnalysisService {
         this.reportRepository = reportRepository;
         this.insightRepository = insightRepository;
         this.emailService = emailService;
-        this.notificationProducer = notificationProducer;
         this.openRouterApiKey = openRouterApiKey;
         this.openRouterModel = openRouterModel;
         this.objectMapper = objectMapper;
@@ -74,13 +70,9 @@ public class ReportAnalysisService {
                     .build();
             report = reportRepository.save(report);
 
-            // 3. Emit Kafka event for async analysis
-            notificationProducer.publishReportAnalysis(com.clinicai.backend.event.ReportAnalysisEvent.builder()
-                    .reportId(report.getId())
-                    .userId(user.getId())
-                    .storagePath(storagePath)
-                    .contentType(file.getContentType())
-                    .build());
+            // 3. Process asynchronously using Spring @Async instead of Kafka
+            ReportAnalysisService self = (ReportAnalysisService) org.springframework.aop.framework.AopContext.currentProxy();
+            self.analyzeReportAsync(report.getId());
 
             return ReportUploadResponse.builder()
                     .reportId(report.getId())
@@ -99,8 +91,9 @@ public class ReportAnalysisService {
     }
 
     /**
-     * Perform the actual AI analysis asynchronously (called by Kafka consumer).
+     * Perform the actual AI analysis asynchronously.
      */
+    @org.springframework.scheduling.annotation.Async
     @org.springframework.transaction.annotation.Transactional
     public void analyzeReportAsync(Long reportId) {
         MedicalReport report = reportRepository.findById(reportId)

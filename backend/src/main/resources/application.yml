@@ -26,26 +26,6 @@ spring:
     init:
       mode: ${SQL_INIT_MODE:never}
 
-  kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      properties:
-        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
-        sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
-        sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
-    consumer:
-      group-id: medlocator-group
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: "*"
-        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
-        sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
-        sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
-
   mail:
     host: smtp.gmail.com
     port: 587
