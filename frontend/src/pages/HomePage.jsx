@@ -42,11 +42,29 @@ export default function HomePage() {
   const { cache, updateCache } = useSearchCache();
   const [featured, setFeatured] = useState(cache.query === 'clinic' ? cache.results.slice(0, 3) : []);
   const [loading, setLoading] = useState(cache.query === 'clinic' ? false : true);
+  const [cityName, setCityName] = useState('Near You');
   const homeSearchRef = useRef(null);
 
   useEffect(() => {
     if (homeSearchRef.current === 'clinic') return;
     homeSearchRef.current = 'clinic';
+
+    const fetchCityName = (lat, lng) => {
+      fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=10`)
+        .then((res) => res.json())
+        .then((data) => {
+          const city =
+            data?.address?.city ||
+            data?.address?.town ||
+            data?.address?.state_district ||
+            data?.address?.state ||
+            null;
+          if (city) setCityName(`in ${city}`);
+        })
+        .catch(() => {
+          // Keep default "Near You"
+        });
+    };
 
     const fetchClinics = (lat, lng) => {
       // Only show loading if we don't have cached clinics
@@ -69,7 +87,11 @@ export default function HomePage() {
     }
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => fetchClinics(pos.coords.latitude, pos.coords.longitude),
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        fetchClinics(latitude, longitude);
+        fetchCityName(latitude, longitude);
+      },
       () => {
         setLoading(false);
         console.warn('Geolocation denied or failed on home page');
@@ -104,7 +126,7 @@ export default function HomePage() {
 
           {/* Stats */}
           <div className="grid grid-cols-3 gap-6 max-w-lg mx-auto mt-12 pt-12 border-t border-slate-100">
-            {[['500+', 'Clinics in Delhi'], ['< 30s', 'AI Analysis'], ['10K+', 'Reports Scanned']].map(([n, l]) => (
+            {[['500+', `Clinics ${cityName}`], ['< 30s', 'AI Analysis'], ['10K+', 'Reports Scanned']].map(([n, l]) => (
               <div key={l} className="text-center">
                 <p className="text-2xl font-extrabold text-slate-800">{n}</p>
                 <p className="text-slate-500 text-xs mt-1 uppercase tracking-wider font-semibold">{l}</p>
