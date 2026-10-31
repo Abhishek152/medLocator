@@ -26,6 +26,7 @@ public class PlacesService {
         this.objectMapper = objectMapper;
         this.webClient = WebClient.builder()
                 .baseUrl("https://places.googleapis.com/v1")
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
                 .build();
     }
 
@@ -55,7 +56,7 @@ public class PlacesService {
             String response = webClient.post()
                     .uri("/places:searchText")
                     .header("X-Goog-Api-Key", apiKey)
-                    .header("X-Goog-FieldMask", "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos")
+                    .header("X-Goog-FieldMask", "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos.name")
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(requestBody)
                     .retrieve()
@@ -98,7 +99,7 @@ public class PlacesService {
             String response = webClient.get()
                     .uri("/places/" + placeId)
                     .header("X-Goog-Api-Key", apiKey)
-                    .header("X-Goog-FieldMask", "id,displayName,formattedAddress,rating,userRatingCount,nationalPhoneNumber,location,regularOpeningHours,photos,reviews")
+                    .header("X-Goog-FieldMask", "id,displayName,formattedAddress,rating,userRatingCount,nationalPhoneNumber,location,regularOpeningHours,photos.name,reviews")
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
