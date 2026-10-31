@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -24,70 +25,58 @@ public class PlacesService {
         this.apiKey = apiKey;
         this.objectMapper = objectMapper;
         this.webClient = WebClient.builder()
-                .baseUrl("https://maps.googleapis.com/maps/api/place")
+                .baseUrl("https://places.googleapis.com/v1")
                 .build();
     }
 
     /**
-     * Simple, direct search: sends the query as-is to Google Places
-     * with pagination (up to 60 results). No extra fan-out queries.
+     * Search nearby clinics/labs using Google Places API (New) - places:searchText
      */
     public List<NearbyPlaceDTO> searchNearby(double lat, double lng, String query, int radiusM) {
         Map<String, NearbyPlaceDTO> uniquePlaces = new LinkedHashMap<>();
-        String pageToken = null;
 
-        for (int page = 0; page < 3; page++) {
-            try {
-                final String token = pageToken;
-                String response = webClient.get()
-                        .uri(uriBuilder -> {
-                            var builder = uriBuilder
-                                    .path("/nearbysearch/json")
-                                    .queryParam("location", lat + "," + lng)
-                                    .queryParam("radius", radiusM)
-                                    .queryParam("keyword", query)
-                                    .queryParam("key", apiKey);
-                            if (token != null) {
-                                builder.queryParam("pagetoken", token);
-                            }
-                            return builder.build();
-                        })
-                        .retrieve()
-                        .bodyToMono(String.class)
-                        .block();
+        try {
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("textQuery", (query != null && !query.isBlank()) ? query : "clinic");
+            requestBody.put("maxResultCount", 20);
 
+            Map<String, Object> center = new HashMap<>();
+            center.put("latitude", lat);
+            center.put("longitude", lng);
+
+            Map<String, Object> circle = new HashMap<>();
+            circle.put("center", center);
+            circle.put("radius", (double) (radiusM > 0 ? radiusM : 5000));
+
+            Map<String, Object> locationBias = new HashMap<>();
+            locationBias.put("circle", circle);
+            requestBody.put("locationBias", locationBias);
+
+            String response = webClient.post()
+                    .uri("/places:searchText")
+                    .header("X-Goog-Api-Key", apiKey)
+                    .header("X-Goog-FieldMask", "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            if (response != null) {
                 JsonNode root = objectMapper.readTree(response);
-                String status = root.path("status").asText();
-
-                if (!"OK".equals(status) && !"ZERO_RESULTS".equals(status)) {
-                    log.warn("Places API status={} for query='{}'", status, query);
-                    break;
-                }
-
-                for (JsonNode place : root.path("results")) {
-                    NearbyPlaceDTO dto = parsePlace(place, lat, lng);
-                    if (dto != null) {
-                        uniquePlaces.putIfAbsent(dto.getPlaceId(), dto);
+                JsonNode placesNode = root.path("places");
+                if (placesNode.isArray()) {
+                    for (JsonNode place : placesNode) {
+                        NearbyPlaceDTO dto = parsePlace(place, lat, lng);
+                        if (dto != null) {
+                            uniquePlaces.putIfAbsent(dto.getPlaceId(), dto);
+                        }
                     }
                 }
-
-                // Check for next page
-                pageToken = root.has("next_page_token") && !root.path("next_page_token").asText().isBlank()
-                        ? root.path("next_page_token").asText()
-                        : null;
-
-                if (pageToken == null) break;
-
-                // Google requires ~2s before next_page_token is valid
-                Thread.sleep(2000);
-
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                log.error("Error fetching page {} for query='{}': {}", page, query, e.getMessage());
-                break;
             }
+
+        } catch (Exception e) {
+            log.error("Error calling Places API (New) for query='{}': {}", query, e.getMessage());
         }
 
         List<NearbyPlaceDTO> results = new ArrayList<>(uniquePlaces.values());
@@ -98,57 +87,72 @@ public class PlacesService {
     }
 
     /**
-     * Get detailed info for a specific place.
+     * Get detailed info for a specific place using Places API (New)
      */
     public NearbyPlaceDTO getPlaceDetails(String placeId) {
         return getPlaceDetails(placeId, null, null);
     }
 
     public NearbyPlaceDTO getPlaceDetails(String placeId, Double userLat, Double userLng) {
-        String response = webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/details/json")
-                        .queryParam("place_id", placeId)
-                        .queryParam("fields", "name,formatted_address,formatted_phone_number,rating,user_ratings_total,geometry,opening_hours,photos,place_id,reviews")
-                        .queryParam("key", apiKey)
-                        .build())
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
+        try {
+            String response = webClient.get()
+                    .uri("/places/" + placeId)
+                    .header("X-Goog-Api-Key", apiKey)
+                    .header("X-Goog-FieldMask", "id,displayName,formattedAddress,rating,userRatingCount,nationalPhoneNumber,location,regularOpeningHours,photos,reviews")
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
 
-        NearbyPlaceDTO details = parsePlaceDetails(response);
-        if (details != null && userLat != null && userLng != null) {
-            double distance = calculateDistance(userLat, userLng, details.getLatitude(), details.getLongitude());
-            details.setDistanceKm(Math.round(distance * 10.0) / 10.0);
+            if (response == null) {
+                return null;
+            }
+
+            NearbyPlaceDTO details = parsePlaceDetails(response);
+            if (details != null && userLat != null && userLng != null) {
+                double distance = calculateDistance(userLat, userLng, details.getLatitude(), details.getLongitude());
+                details.setDistanceKm(Math.round(distance * 10.0) / 10.0);
+            }
+            return details;
+        } catch (Exception e) {
+            log.error("Failed to fetch Place Details for placeId {}: {}", placeId, e.getMessage());
+            return null;
         }
-        return details;
     }
 
     // ---- Parsing ----
 
     private NearbyPlaceDTO parsePlace(JsonNode place, double userLat, double userLng) {
         try {
-            double placeLat = place.path("geometry").path("location").path("lat").asDouble();
-            double placeLng = place.path("geometry").path("location").path("lng").asDouble();
+            double placeLat = place.path("location").path("latitude").asDouble();
+            double placeLng = place.path("location").path("longitude").asDouble();
             double distance = calculateDistance(userLat, userLng, placeLat, placeLng);
 
             String photoUrl = null;
             JsonNode photos = place.path("photos");
             if (photos.isArray() && !photos.isEmpty()) {
-                String photoRef = photos.get(0).path("photo_reference").asText();
-                photoUrl = "https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=" + photoRef + "&key=" + apiKey;
+                String photoName = photos.get(0).path("name").asText();
+                if (!photoName.isBlank()) {
+                    photoUrl = "https://places.googleapis.com/v1/" + photoName + "/media?maxHeightPx=400&maxWidthPx=400&key=" + apiKey;
+                }
             }
 
+            String name = place.path("displayName").path("text").asText("");
+            if (name.isBlank()) {
+                name = place.path("name").asText();
+            }
+
+            boolean isOpen = place.path("regularOpeningHours").path("openNow").asBoolean(false);
+
             return NearbyPlaceDTO.builder()
-                    .placeId(place.path("place_id").asText())
-                    .name(place.path("name").asText())
-                    .address(place.path("vicinity").asText())
-                    .rating(place.path("rating").asDouble(0))
-                    .userRatingsTotal(place.path("user_ratings_total").asInt(0))
+                    .placeId(place.path("id").asText())
+                    .name(name)
+                    .address(place.path("formattedAddress").asText())
+                    .rating(place.path("rating").asDouble(0.0))
+                    .userRatingsTotal(place.path("userRatingCount").asInt(0))
                     .latitude(placeLat)
                     .longitude(placeLng)
                     .distanceKm(Math.round(distance * 10.0) / 10.0)
-                    .isOpen(place.path("opening_hours").path("open_now").asBoolean(false))
+                    .isOpen(isOpen)
                     .photoUrl(photoUrl)
                     .build();
         } catch (Exception e) {
@@ -160,39 +164,57 @@ public class PlacesService {
     private NearbyPlaceDTO parsePlaceDetails(String json) {
         try {
             JsonNode root = objectMapper.readTree(json);
-            JsonNode result = root.path("result");
 
             String photoUrl = null;
-            JsonNode photos = result.path("photos");
+            JsonNode photos = root.path("photos");
             if (photos.isArray() && !photos.isEmpty()) {
-                String photoRef = photos.get(0).path("photo_reference").asText();
-                photoUrl = "https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=" + photoRef + "&key=" + apiKey;
+                String photoName = photos.get(0).path("name").asText();
+                if (!photoName.isBlank()) {
+                    photoUrl = "https://places.googleapis.com/v1/" + photoName + "/media?maxHeightPx=400&maxWidthPx=400&key=" + apiKey;
+                }
             }
 
-            double lat = result.path("geometry").path("location").path("lat").asDouble();
-            double lng = result.path("geometry").path("location").path("lng").asDouble();
+            double lat = root.path("location").path("latitude").asDouble();
+            double lng = root.path("location").path("longitude").asDouble();
 
             List<String> reviewsList = new ArrayList<>();
-            JsonNode reviewsNode = result.path("reviews");
+            JsonNode reviewsNode = root.path("reviews");
             if (reviewsNode.isArray()) {
                 for (JsonNode review : reviewsNode) {
-                    String text = review.path("text").asText("");
+                    String text = review.path("text").path("text").asText("");
+                    if (text.isBlank()) {
+                        text = review.path("originalText").path("text").asText("");
+                    }
+                    if (text.isBlank()) {
+                        text = review.path("text").asText("");
+                    }
                     if (!text.isBlank()) {
                         reviewsList.add(text);
                     }
                 }
             }
 
+            String name = root.path("displayName").path("text").asText("");
+            if (name.isBlank()) {
+                name = root.path("name").asText();
+            }
+
+            String phone = root.has("nationalPhoneNumber")
+                    ? root.path("nationalPhoneNumber").asText(null)
+                    : (root.has("internationalPhoneNumber") ? root.path("internationalPhoneNumber").asText(null) : null);
+
+            boolean isOpen = root.path("regularOpeningHours").path("openNow").asBoolean(false);
+
             return NearbyPlaceDTO.builder()
-                    .placeId(result.path("place_id").asText())
-                    .name(result.path("name").asText())
-                    .address(result.path("formatted_address").asText())
-                    .rating(result.path("rating").asDouble(0))
-                    .userRatingsTotal(result.path("user_ratings_total").asInt(0))
-                    .phoneNumber(result.path("formatted_phone_number").asText(null))
+                    .placeId(root.path("id").asText())
+                    .name(name)
+                    .address(root.path("formattedAddress").asText())
+                    .rating(root.path("rating").asDouble(0.0))
+                    .userRatingsTotal(root.path("userRatingCount").asInt(0))
+                    .phoneNumber(phone)
                     .latitude(lat)
                     .longitude(lng)
-                    .isOpen(result.path("opening_hours").path("open_now").asBoolean(false))
+                    .isOpen(isOpen)
                     .photoUrl(photoUrl)
                     .reviews(reviewsList)
                     .build();
