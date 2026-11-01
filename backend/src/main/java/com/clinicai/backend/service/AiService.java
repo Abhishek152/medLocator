@@ -24,6 +24,7 @@ public class AiService {
     private final WebClient groqClient;
     private final ObjectMapper objectMapper;
     private final String groqApiKey;
+    private volatile String activeModel = "openai/gpt-oss-120b";
 
     public AiService(
             MedicalTestRepository medicalTestRepository,
@@ -92,7 +93,7 @@ public class AiService {
     }
 
     private String callGroqApi(String prompt) throws Exception {
-        return callGroqApiWithModel(prompt, "llama-3.3-70b-versatile");
+        return callGroqApiWithModel(prompt, activeModel);
     }
 
     private String callGroqApiWithModel(String prompt, String model) throws Exception {
@@ -117,20 +118,23 @@ public class AiService {
                     .block();
 
             JsonNode root = objectMapper.readTree(response);
+            this.activeModel = model;
             return root.path("choices").get(0)
                     .path("message").path("content").asText();
         } catch (org.springframework.web.reactive.function.client.WebClientResponseException wce) {
             log.error("Groq API error with model {}: status={}, body={}", model, wce.getStatusCode(), wce.getResponseBodyAsString());
             
-            // Query available models from Groq to find an allowed model
+            // Query available models from Groq to find an allowed chat model
             List<String> available = getAvailableGroqModels();
             log.warn("Available models on this Groq account: {}", available);
 
             for (String fallback : available) {
-                if (!fallback.startsWith("ERROR") && !fallback.contains("whisper") && !fallback.equals(model)) {
-                    log.info("Trying available Groq model: {}", fallback);
+                if (isChatModel(fallback) && !fallback.equals(model)) {
+                    log.info("Trying available Groq chat model: {}", fallback);
                     try {
-                        return callGroqApiWithSingleModel(prompt, fallback);
+                        String result = callGroqApiWithSingleModel(prompt, fallback);
+                        this.activeModel = fallback;
+                        return result;
                     } catch (Exception ex) {
                         log.warn("Fallback to {} also failed: {}", fallback, ex.getMessage());
                     }
@@ -138,6 +142,16 @@ public class AiService {
             }
             throw wce;
         }
+    }
+
+    private boolean isChatModel(String modelId) {
+        String lower = modelId.toLowerCase();
+        return !lower.startsWith("error")
+                && !lower.contains("whisper")
+                && !lower.contains("guard")
+                && !lower.contains("orpheus")
+                && !lower.contains("safeguard")
+                && !lower.contains("embedding");
     }
 
     private String callGroqApiWithSingleModel(String prompt, String model) throws Exception {
