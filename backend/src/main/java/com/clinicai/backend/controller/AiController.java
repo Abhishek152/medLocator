@@ -35,4 +35,10 @@ public class AiController {
             @RequestParam String query) {
         return ResponseEntity.ok(aiService.recommendNearbyPlaces(query, lat, lng));
     }
+
+    @GetMapping("/groq-models")
+    @Operation(summary = "Check available Groq models for configured key")
+    public ResponseEntity<List<String>> getGroqModels() {
+        return ResponseEntity.ok(aiService.getAvailableGroqModels());
+    }
 }

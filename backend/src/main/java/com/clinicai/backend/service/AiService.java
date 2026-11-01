@@ -121,11 +121,72 @@ public class AiService {
                     .path("message").path("content").asText();
         } catch (org.springframework.web.reactive.function.client.WebClientResponseException wce) {
             log.error("Groq API error with model {}: status={}, body={}", model, wce.getStatusCode(), wce.getResponseBodyAsString());
-            if (!"llama-3.1-8b-instant".equals(model)) {
-                log.info("Retrying Groq with fallback model llama-3.1-8b-instant...");
-                return callGroqApiWithModel(prompt, "llama-3.1-8b-instant");
+            
+            // Query available models from Groq to find an allowed model
+            List<String> available = getAvailableGroqModels();
+            log.warn("Available models on this Groq account: {}", available);
+
+            for (String fallback : available) {
+                if (!fallback.startsWith("ERROR") && !fallback.contains("whisper") && !fallback.equals(model)) {
+                    log.info("Trying available Groq model: {}", fallback);
+                    try {
+                        return callGroqApiWithSingleModel(prompt, fallback);
+                    } catch (Exception ex) {
+                        log.warn("Fallback to {} also failed: {}", fallback, ex.getMessage());
+                    }
+                }
             }
             throw wce;
+        }
+    }
+
+    private String callGroqApiWithSingleModel(String prompt, String model) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("model", model);
+        payload.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+        payload.put("temperature", 0.1);
+        payload.put("max_tokens", 1024);
+        payload.put("response_format", Map.of("type", "json_object"));
+
+        String requestBody = objectMapper.writeValueAsString(payload);
+        String cleanKey = (groqApiKey != null) ? groqApiKey.trim().replaceAll("^[\"']|[\"']$", "") : "";
+        String response = groqClient.post()
+                .uri("/chat/completions")
+                .header("Authorization", "Bearer " + cleanKey)
+                .header("Content-Type", "application/json")
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+        JsonNode root = objectMapper.readTree(response);
+        return root.path("choices").get(0)
+                .path("message").path("content").asText();
+    }
+
+    public List<String> getAvailableGroqModels() {
+        try {
+            String cleanKey = (groqApiKey != null) ? groqApiKey.trim().replaceAll("^[\"']|[\"']$", "") : "";
+            String response = groqClient.get()
+                    .uri("/models")
+                    .header("Authorization", "Bearer " + cleanKey)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            JsonNode root = objectMapper.readTree(response);
+            List<String> modelIds = new ArrayList<>();
+            for (JsonNode m : root.path("data")) {
+                modelIds.add(m.path("id").asText());
+            }
+            log.info("Available Groq models for this key: {}", modelIds);
+            return modelIds;
+        } catch (org.springframework.web.reactive.function.client.WebClientResponseException wce) {
+            log.error("Failed to list Groq models: status={}, body={}", wce.getStatusCode(), wce.getResponseBodyAsString());
+            return List.of("ERROR: " + wce.getStatusCode() + " - " + wce.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Failed to list Groq models: {}", e.getMessage());
+            return List.of("ERROR: " + e.getMessage());
         }
     }
 
