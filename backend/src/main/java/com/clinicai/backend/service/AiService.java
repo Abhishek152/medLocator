@@ -92,8 +92,12 @@ public class AiService {
     }
 
     private String callGroqApi(String prompt) throws Exception {
+        return callGroqApiWithModel(prompt, "llama-3.3-70b-versatile");
+    }
+
+    private String callGroqApiWithModel(String prompt, String model) throws Exception {
         Map<String, Object> payload = new HashMap<>();
-        payload.put("model", "llama-3.3-70b-versatile");
+        payload.put("model", model);
         payload.put("messages", List.of(Map.of("role", "user", "content", prompt)));
         payload.put("temperature", 0.1);
         payload.put("max_tokens", 1024);
@@ -101,19 +105,28 @@ public class AiService {
 
         String requestBody = objectMapper.writeValueAsString(payload);
 
-        String response = groqClient.post()
-                .uri("/chat/completions")
-                .header("Authorization", "Bearer " + groqApiKey)
-                .header("Content-Type", "application/json")
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
+        try {
+            String cleanKey = (groqApiKey != null) ? groqApiKey.trim().replaceAll("^[\"']|[\"']$", "") : "";
+            String response = groqClient.post()
+                    .uri("/chat/completions")
+                    .header("Authorization", "Bearer " + cleanKey)
+                    .header("Content-Type", "application/json")
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
 
-        // Extract text from Groq response (OpenAI layout)
-        JsonNode root = objectMapper.readTree(response);
-        return root.path("choices").get(0)
-                .path("message").path("content").asText();
+            JsonNode root = objectMapper.readTree(response);
+            return root.path("choices").get(0)
+                    .path("message").path("content").asText();
+        } catch (org.springframework.web.reactive.function.client.WebClientResponseException wce) {
+            log.error("Groq API error with model {}: status={}, body={}", model, wce.getStatusCode(), wce.getResponseBodyAsString());
+            if (!"llama-3.1-8b-instant".equals(model)) {
+                log.info("Retrying Groq with fallback model llama-3.1-8b-instant...");
+                return callGroqApiWithModel(prompt, "llama-3.1-8b-instant");
+            }
+            throw wce;
+        }
     }
 
     private AiTestRecommendationResponse parseTestRecommendation(String aiResponse, String symptoms) throws Exception {
