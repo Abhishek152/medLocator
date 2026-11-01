@@ -35,7 +35,7 @@ public class AiService {
         this.groqApiKey = groqApiKey;
         this.objectMapper = objectMapper;
         this.groqClient = WebClient.builder()
-                .baseUrl("https://api.groq.com/openai/v1/chat/completions")
+                .baseUrl("https://api.groq.com/openai/v1")
                 .build();
     }
 
@@ -54,7 +54,7 @@ public class AiService {
 
             return parseTestRecommendation(aiResponse, symptoms);
         } catch (Exception e) {
-            log.error("Groq API or parsing failed for symptoms '{}': {}", symptoms, e.getMessage());
+            log.error("Groq API or parsing failed for symptoms '{}': {}", symptoms, e.getMessage(), e);
             return buildFallbackResponse(symptoms);
         }
     }
@@ -92,17 +92,17 @@ public class AiService {
     }
 
     private String callGroqApi(String prompt) throws Exception {
-        String requestBody = objectMapper.writeValueAsString(Map.of(
-                "model", "llama-3.3-70b-versatile",
-                "messages", List.of(Map.of(
-                        "role", "user",
-                        "content", prompt
-                )),
-                "temperature", 0.1,
-                "max_tokens", 1024
-        ));
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("model", "llama-3.3-70b-versatile");
+        payload.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+        payload.put("temperature", 0.1);
+        payload.put("max_tokens", 1024);
+        payload.put("response_format", Map.of("type", "json_object"));
+
+        String requestBody = objectMapper.writeValueAsString(payload);
 
         String response = groqClient.post()
+                .uri("/chat/completions")
                 .header("Authorization", "Bearer " + groqApiKey)
                 .header("Content-Type", "application/json")
                 .bodyValue(requestBody)
