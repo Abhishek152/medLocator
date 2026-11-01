@@ -116,8 +116,8 @@ public class ReportAnalysisService {
             reportRepository.save(report);
 
             // 5. Send Email Notification
-            emailService.sendReportSummary(report.getUser(), report, insight);
-            report.setEmailSent(true);
+            boolean emailed = emailService.sendReportSummary(report.getUser(), report, insight);
+            report.setEmailSent(emailed);
             reportRepository.save(report);
             
             log.info("Async AI analysis completed for report: {}", reportId);
