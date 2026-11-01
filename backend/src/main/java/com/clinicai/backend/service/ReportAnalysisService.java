@@ -27,27 +27,24 @@ public class ReportAnalysisService {
     private final ReportInsightRepository insightRepository;
     private final EmailService emailService;
     private final ObjectMapper objectMapper;
-    private final String openRouterApiKey;
-    private final String openRouterModel;
-    private final WebClient openRouterClient;
+    private final String groqApiKey;
+    private final WebClient groqVisionClient;
 
     public ReportAnalysisService(
             R2StorageService r2StorageService,
             MedicalReportRepository reportRepository,
             ReportInsightRepository insightRepository,
             EmailService emailService,
-            @Value("${openrouter.api-key}") String openRouterApiKey,
-            @Value("${openrouter.model}") String openRouterModel,
+            @Value("${groq.api-key}") String groqApiKey,
             ObjectMapper objectMapper) {
         this.r2StorageService = r2StorageService;
         this.reportRepository = reportRepository;
         this.insightRepository = insightRepository;
         this.emailService = emailService;
-        this.openRouterApiKey = openRouterApiKey;
-        this.openRouterModel = openRouterModel;
+        this.groqApiKey = groqApiKey;
         this.objectMapper = objectMapper;
-        this.openRouterClient = WebClient.builder()
-                .baseUrl("https://openrouter.ai/api/v1")
+        this.groqVisionClient = WebClient.builder()
+                .baseUrl("https://api.groq.com/openai/v1")
                 .codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
     }
@@ -108,8 +105,8 @@ public class ReportAnalysisService {
             byte[] fileBytes = r2StorageService.download(report.getStoragePath());
             String base64Data = Base64.getEncoder().encodeToString(fileBytes);
 
-            // 2. Call OpenRouter Vision API
-            String aiResponse = callOpenRouterVision(base64Data, report.getContentType());
+            // 2. Call Groq Vision API
+            String aiResponse = callGroqVision(base64Data, report.getContentType());
 
             // 3. Parse AI response and save insight
             ReportInsight insight = parseAndSaveInsight(aiResponse, report);
@@ -155,7 +152,7 @@ public class ReportAnalysisService {
         return toDetailDTO(report);
     }
 
-    private String callOpenRouterVision(String base64Data, String mimeType) throws Exception {
+    private String callGroqVision(String base64Data, String mimeType) throws Exception {
         String prompt = """
             You are a medical report analysis AI. Analyze the following medical report image/document.
             
@@ -180,8 +177,9 @@ public class ReportAnalysisService {
 
         String dataUrl = "data:" + mimeType + ";base64," + base64Data;
 
+        // NOTE: Do not include response_format for vision calls — qwen/qwen3.8-27b may not support it with images
         Map<String, Object> requestBody = Map.of(
-                "model", openRouterModel,
+                "model", "qwen/qwen3.8-27b",
                 "messages", List.of(Map.of(
                         "role", "user",
                         "content", List.of(
@@ -189,19 +187,22 @@ public class ReportAnalysisService {
                                 Map.of("type", "image_url", "image_url", Map.of("url", dataUrl))
                         )
                 )),
-                "temperature", 0.1
+                "temperature", 0.1,
+                "max_tokens", 1024
         );
 
-        String response = openRouterClient.post()
+        log.info("Calling Groq vision API for medical report analysis (model: qwen/qwen3.8-27b)");
+
+        String response = groqVisionClient.post()
                 .uri("/chat/completions")
-                .header("Authorization", "Bearer " + openRouterApiKey)
+                .header("Authorization", "Bearer " + groqApiKey)
                 .header("Content-Type", "application/json")
                 .bodyValue(objectMapper.writeValueAsString(requestBody))
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();
 
-        // Extract text from OpenAI/OpenRouter response format
+        // Extract text from OpenAI-compatible response format
         JsonNode root = objectMapper.readTree(response);
         return root.path("choices").get(0)
                 .path("message").path("content").asText();

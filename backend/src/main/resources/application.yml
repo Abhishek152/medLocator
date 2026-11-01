@@ -43,12 +43,7 @@ google:
   places:
     api-key: ${GOOGLE_PLACES_API_KEY}
 
-# OpenRouter configuration (for Medical Report Vision Analysis)
-openrouter:
-  api-key: ${OPENROUTER_API_KEY}
-  model: "nvidia/nemotron-nano-12b-v2-vl:free"
-
-# Groq configuration (for Symptom Checker Text Analysis)
+# Groq configuration (for Symptom Checker Text Analysis + Medical Report Vision Analysis)
 groq:
   api-key: ${GROQ_API_KEY}
 
